@@ -16,7 +16,7 @@ describe("AiChatSidebar", () => {
   });
 
   it("sends prompt and renders assistant response", async () => {
-    const onSend = vi.fn().mockResolvedValue({ message: "Created a new card in Todo." });
+    const onSend = vi.fn().mockResolvedValue({ message: "Created a new card in To Do." });
 
     render(<AiChatSidebar onSend={onSend} />);
 
@@ -24,7 +24,7 @@ describe("AiChatSidebar", () => {
     await userEvent.click(screen.getByRole("button", { name: /send to ai/i }));
 
     expect(onSend).toHaveBeenCalled();
-    expect(await screen.findByText(/created a new card in todo/i)).toBeInTheDocument();
+    expect(await screen.findByText(/created a new card in to do/i)).toBeInTheDocument();
   });
 
   it("shows error when AI call fails", async () => {

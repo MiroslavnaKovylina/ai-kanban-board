@@ -11,7 +11,7 @@ def utc_now() -> str:
 
 DEFAULT_COLUMN_TITLES = [
     "Backlog",
-    "Todo",
+    "To Do",
     "In Progress",
     "Review",
     "Done",
@@ -95,7 +95,10 @@ def initialize_schema(connection: sqlite3.Connection) -> None:
             "CREATE INDEX IF NOT EXISTS idx_boards_user_id ON boards(user_id)",
             "CREATE INDEX IF NOT EXISTS idx_columns_board_id ON \"columns\"(board_id)",
             "CREATE INDEX IF NOT EXISTS idx_cards_column_id ON cards(column_id)",
-        ]
+        ],
+        2: [
+            "UPDATE \"columns\" SET title = 'To Do' WHERE title = 'Todo'",
+        ],
     }
 
     for version in sorted(migrations.keys()):

@@ -51,3 +51,52 @@ A working MVP of the frontend has been built and is already in frontend. This is
 
 All documents for planning and executing this project will be in the docs/ directory.
 Please review the docs/PLAN.md document before proceeding.
+
+## Final Run and Validation Instructions (Part 11)
+
+This phase is packaging, cleanup, and validation only. Do not add new features.
+
+### Container run sequence
+
+1. Build the final image and start services from project root:
+	- `docker compose build --no-cache`
+	- `docker compose up -d`
+2. Validate container health and logs:
+	- `docker compose ps`
+	- `docker compose logs --tail=200`
+3. Validate app routes:
+	- UI: `http://localhost:8000`
+	- API sanity: `http://localhost:8000/api/ping`
+	- AI sanity (with key configured): `http://localhost:8000/api/ai/sanity`
+
+### Manual validation checklist (must pass in Docker runtime)
+
+1. UI loads fully styled Kanban board from `localhost:8000`.
+2. Register/login/logout work correctly.
+3. Rename columns, add/edit/move/delete cards, then refresh and confirm persistence.
+4. Sign out and sign in again; confirm same board state persists.
+5. AI chat sidebar sends prompt, receives response, and applies board updates when returned.
+6. Abuse protection checks for AI endpoint:
+	- trigger repeated requests and confirm `429` is returned after the per-minute threshold
+	- send invalid `Origin` or `Referer` and confirm `403`
+	- send oversized prompt/history and confirm `422`
+
+### Environment and git hygiene checks
+
+1. Ensure `.env` is present locally for runtime but not committed:
+	- `git ls-files --error-unmatch .env` should fail.
+2. Ensure ignore rules include:
+	- virtual environments (`.venv`, `.venv-win`, `.venv*`)
+	- Node dependencies (`node_modules/`)
+	- frontend build outputs (`.next/`, `out/`)
+	- database artifacts (`*.db`, `*.sqlite`, `backend/data/` as applicable)
+3. Verify with:
+	- `git status --ignored`
+	- `git check-ignore -v <path>` for representative files
+
+### Completion evidence to capture in docs/PLAN.md
+
+1. Docker build command and result.
+2. Docker runtime validation summary.
+3. Manual test results for auth, persistence, and AI.
+4. Git hygiene verification summary.

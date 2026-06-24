@@ -1,6 +1,5 @@
 "use client";
 
-import { NextRouter } from "next/navigation";
 import { type BoardData } from "@/lib/kanban";
 
 const AUTH_STORAGE_KEY = "kanban-auth-session";
@@ -24,6 +23,10 @@ const API_BASE_URL = resolveApiBaseUrl();
 type AuthSession = {
   username: string;
   password: string;
+};
+
+type RouterLike = {
+  push: (href: string) => void;
 };
 
 export type ChatHistoryMessage = {
@@ -171,7 +174,7 @@ export const sendAiBoardPrompt = async (
   return (await response.json()) as AiBoardResponse;
 };
 
-export const logout = (router: NextRouter) => {
+export const logout = (router: RouterLike) => {
   if (typeof window !== "undefined") {
     localStorage.removeItem(AUTH_STORAGE_KEY);
   }

@@ -76,7 +76,7 @@ class ApiTests(unittest.TestCase):
 
         new_board = {
             "columns": [
-                {"id": "todo", "title": "Todo", "cardIds": ["c1"]},
+                {"id": "todo", "title": "To Do", "cardIds": ["c1"]},
                 {"id": "done", "title": "Done", "cardIds": []},
             ],
             "cards": {
@@ -114,7 +114,7 @@ class ApiTests(unittest.TestCase):
         )
 
         invalid_board = {
-            "columns": [{"id": "todo", "title": "Todo", "cardIds": ["missing"]}],
+            "columns": [{"id": "todo", "title": "To Do", "cardIds": ["missing"]}],
             "cards": {},
         }
         response = self.client.post(

@@ -15,7 +15,8 @@ RUN pip install uv
 COPY backend/pyproject.toml ./
 RUN uv sync
 
-COPY backend/main.py ./
+# Copy backend source files used by FastAPI app.
+COPY backend/*.py ./
 COPY --from=frontend-build /app/out ./static
 
 EXPOSE 8000

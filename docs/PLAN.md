@@ -212,6 +212,60 @@ Status (Part 10 - active):
 - Started on 2026-06-24: AI chat sidebar integrated in Kanban board and connected to backend `/api/ai/board` endpoint.
 - Validation so far: frontend tests pass (`vitest`, 14 tests) including chat sidebar behavior.
 
+Status (Part 10 - completed):
+- Completed on 2026-06-24: local development validation passed for chat send/response flow and AI-driven board updates.
+
+## Part 11: Final containerization and production validation
+
+- [x] Build the final Docker image for the integrated app
+- [x] Serve frontend and backend from the same container
+- [x] Verify `http://localhost:8000` renders the fully styled Kanban UI
+- [x] Verify authentication works from the containerized app
+- [x] Verify board persistence works from the containerized app
+- [x] Verify AI assistant works from the containerized app using `OPENROUTER_API_KEY`
+- [x] Verify AI abuse protection in container runtime (rate limit, origin validation, input size limits)
+- [x] Verify refresh and relogin persistence from the containerized app
+- [x] Ensure `.env` is not committed to git
+- [x] Ensure virtual environments, node_modules, build outputs, and database files are ignored by git
+- [x] Update `AGENTS.md` and `docs/PLAN.md` with final run/test instructions and validation evidence
+
+### Tests and criteria
+- Build succeeds with a single deployable image that serves UI + API
+- `GET /` on `localhost:8000` returns the production-styled Kanban app (not placeholder)
+- Authentication, board edits, drag/drop, and persistence pass manual validation in container runtime
+- AI sidebar prompt/response and optional board updates pass manual validation in container runtime
+- AI abuse protections are enforced in runtime:
+	- excessive requests return 429
+	- invalid Origin/Referer returns 403
+	- oversized prompt/history/board context returns 422
+- Refresh and sign-out/sign-in cycles retain persisted board state
+- Git hygiene checks pass:
+	- `.env` is excluded from commits
+	- ignore rules cover `.venv*`, `node_modules/`, frontend build outputs (for example `out/`, `.next/`), and SQLite/db artifacts
+- Final instructions are documented and reproducible on a clean local machine
+
+Status (Part 11 - completed):
+- Added on 2026-06-24: final packaging/cleanup/validation phase scoped to Docker runtime only; no new product features.
+- 2026-06-24: backend abuse protection for `/api/ai/board` implemented and covered by tests (`python -m unittest test_ai.py test_ai_board.py`).
+- 2026-06-24: Docker packaging/runtime checks completed:
+	- `docker compose build --no-cache` succeeded for integrated `app` image.
+	- `docker compose up -d` started `app` on `localhost:8000`.
+	- Container logs show clean startup and expected requests (`200` on `/` and `/api/ping`).
+	- Route validation: `/` -> `200` (static UI), `/api/ping` -> `200`, `/api/ai/sanity` -> `200` with response `"4"`.
+- 2026-06-24: abuse protection runtime checks in container:
+	- invalid `Origin` -> `403`
+	- oversized prompt -> `422`
+	- repeated `/api/ai/board` calls exceeded per-minute threshold and returned `429`.
+- 2026-06-24: git hygiene checks:
+	- `.env` not tracked (`git ls-files --error-unmatch .env` failed as expected)
+	- ignore rules verified for `.venv*`, `node_modules/`, `.next/`, `out/`, and `backend/data/`.
+- 2026-06-24: E2E container validation script (`scripts/validate_part11_e2e.py`) executed against running container:
+	- Authentication (register/login): `PASS`
+	- Board CRUD and persistence (load/save/reload): `PASS`
+	- AI endpoint with valid auth: `PASS` (returned AI message `"Columns: Backlog, To Do, In Progress, Review, Done."`)
+	- Relogin persistence (logout/relogin/verify board): `PASS`
+	- All four E2E test suites passed.
+
 ## Quality goals
 
 - Target around 80% unit test coverage when it is sensible; prioritize valuable tests over unnecessary coverage padding

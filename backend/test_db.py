@@ -72,7 +72,7 @@ class DatabaseSchemaTests(unittest.TestCase):
             conn.execute("DELETE FROM cards WHERE column_id IN (SELECT id FROM \"columns\" WHERE board_id = ?)", (board_id,))
             conn.execute("DELETE FROM \"columns\" WHERE board_id = ?", (board_id,))
 
-        col_a = add_column(board_id, "Todo")
+        col_a = add_column(board_id, "To Do")
         col_b = add_column(board_id, "Doing")
         col_c = add_column(board_id, "Done")
 
@@ -96,7 +96,7 @@ class DatabaseSchemaTests(unittest.TestCase):
         with conn:
             conn.execute("DELETE FROM cards WHERE column_id IN (SELECT id FROM \"columns\" WHERE board_id = ?)", (board_id,))
             conn.execute("DELETE FROM \"columns\" WHERE board_id = ?", (board_id,))
-        column_id = add_column(board_id, "Todo")
+        column_id = add_column(board_id, "To Do")
 
         first = add_card(column_id, "Card 1", "")
         second = add_card(column_id, "Card 2", "Details")

@@ -129,11 +129,26 @@ celerybeat.pid
 # Environments
 .env
 .venv
+.venv*
+.venv-win/
 env/
 venv/
 ENV/
 env.bak/
 venv.bak/
+
+# Node and frontend build artifacts
+node_modules/
+frontend/node_modules/
+.next/
+frontend/.next/
+out/
+frontend/out/
+
+# Database artifacts
+*.db
+*.sqlite
+backend/data/
 
 # Spyder project settings
 .spyderproject

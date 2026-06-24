@@ -78,7 +78,7 @@ export const AiChatSidebar = ({ onSend }: AiChatSidebarProps) => {
       <div className="mb-4 flex items-center justify-between">
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[var(--gray-text)]">AI Assistant</p>
-          <h2 className="mt-1 text-lg font-semibold text-[var(--navy-dark)]">Board Copilot</h2>
+          <h2 className="mt-1 text-lg font-semibold text-[var(--navy-dark)]">Kanban Assistant</h2>
         </div>
       </div>
 
@@ -108,7 +108,7 @@ export const AiChatSidebar = ({ onSend }: AiChatSidebarProps) => {
       <form className="mt-4 flex flex-col gap-3" onSubmit={submit}>
         <textarea
           className="min-h-[88px] resize-none rounded-2xl border border-[var(--stroke)] bg-white px-3 py-2 text-sm text-[var(--navy-dark)] outline-none transition focus:border-[var(--primary-blue)] focus:ring-2 focus:ring-[rgba(32,157,215,0.15)]"
-          placeholder="Example: move all review cards to done"
+          placeholder="Example: Move all cards from Review to Done, rename column Todo to To Do"
           value={draft}
           onChange={(event) => setDraft(event.target.value)}
           onKeyDown={handleDraftKeyDown}
