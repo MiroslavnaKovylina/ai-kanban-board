@@ -1,0 +1,16 @@
+services:
+  app:
+    build: .
+    ports:
+      - '8000:8000'
+    environment:
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - '3000:3000'
+    environment:
+      - NODE_ENV=production

@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   DndContext,
   DragOverlay,
@@ -14,10 +15,40 @@ import {
 import { KanbanColumn } from "@/components/KanbanColumn";
 import { KanbanCardPreview } from "@/components/KanbanCardPreview";
 import { createId, initialData, moveCard, type BoardData } from "@/lib/kanban";
+import { loadBoard, logout, saveBoard } from "@/lib/auth";
 
 export const KanbanBoard = () => {
+  const router = useRouter();
   const [board, setBoard] = useState<BoardData>(() => initialData);
   const [activeCardId, setActiveCardId] = useState<string | null>(null);
+  const [syncError, setSyncError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let mounted = true;
+
+    const initializeBoard = async () => {
+      const remoteBoard = await loadBoard();
+      if (!mounted || !remoteBoard) {
+        return;
+      }
+      setBoard(remoteBoard);
+    };
+
+    void initializeBoard();
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  const persistBoard = async (nextBoard: BoardData) => {
+    const success = await saveBoard(nextBoard);
+    if (!success) {
+      setSyncError("Could not sync latest changes to backend.");
+      return;
+    }
+    setSyncError(null);
+  };
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -39,40 +70,52 @@ export const KanbanBoard = () => {
       return;
     }
 
-    setBoard((prev) => ({
-      ...prev,
-      columns: moveCard(prev.columns, active.id as string, over.id as string),
-    }));
+    setBoard((prev) => {
+      const nextBoard = {
+        ...prev,
+        columns: moveCard(prev.columns, active.id as string, over.id as string),
+      };
+      void persistBoard(nextBoard);
+      return nextBoard;
+    });
   };
 
   const handleRenameColumn = (columnId: string, title: string) => {
-    setBoard((prev) => ({
-      ...prev,
-      columns: prev.columns.map((column) =>
-        column.id === columnId ? { ...column, title } : column
-      ),
-    }));
+    setBoard((prev) => {
+      const nextBoard = {
+        ...prev,
+        columns: prev.columns.map((column) =>
+          column.id === columnId ? { ...column, title } : column
+        ),
+      };
+      void persistBoard(nextBoard);
+      return nextBoard;
+    });
   };
 
   const handleAddCard = (columnId: string, title: string, details: string) => {
     const id = createId("card");
-    setBoard((prev) => ({
-      ...prev,
-      cards: {
-        ...prev.cards,
-        [id]: { id, title, details: details || "No details yet." },
-      },
-      columns: prev.columns.map((column) =>
-        column.id === columnId
-          ? { ...column, cardIds: [...column.cardIds, id] }
-          : column
-      ),
-    }));
+    setBoard((prev) => {
+      const nextBoard = {
+        ...prev,
+        cards: {
+          ...prev.cards,
+          [id]: { id, title, details: details || "" },
+        },
+        columns: prev.columns.map((column) =>
+          column.id === columnId
+            ? { ...column, cardIds: [...column.cardIds, id] }
+            : column
+        ),
+      };
+      void persistBoard(nextBoard);
+      return nextBoard;
+    });
   };
 
   const handleDeleteCard = (columnId: string, cardId: string) => {
     setBoard((prev) => {
-      return {
+      const nextBoard = {
         ...prev,
         cards: Object.fromEntries(
           Object.entries(prev.cards).filter(([id]) => id !== cardId)
@@ -86,6 +129,8 @@ export const KanbanBoard = () => {
             : column
         ),
       };
+      void persistBoard(nextBoard);
+      return nextBoard;
     });
   };
 
@@ -131,9 +176,22 @@ export const KanbanBoard = () => {
               </div>
             ))}
           </div>
+          <div className="mt-6 flex justify-end">
+            <button
+              type="button"
+              className="rounded-full border border-[var(--stroke)] bg-white px-4 py-2 text-sm font-semibold text-[var(--navy-dark)] hover:bg-[var(--surface)]"
+              onClick={() => logout(router)}
+            >
+              Logout
+            </button>
+          </div>
+          {syncError ? (
+            <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-600">{syncError}</p>
+          ) : null}
         </header>
 
         <DndContext
+          id="kanban-dnd-context"
           sensors={sensors}
           collisionDetection={closestCorners}
           onDragStart={handleDragStart}
