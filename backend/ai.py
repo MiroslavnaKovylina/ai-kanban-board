@@ -131,6 +131,7 @@ def openrouter_board_structured_response(
         "model": OPENROUTER_MODEL,
         "messages": [system_message, *safe_history, user_message],
         "temperature": 0,
+        "response_format": {"type": "json_object"},
     }
 
     response = httpx.post(

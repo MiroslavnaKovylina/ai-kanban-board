@@ -10,12 +10,12 @@ RUN npm run export
 FROM python:3.12-slim
 WORKDIR /app
 
-RUN pip install uv
+RUN pip install --no-cache-dir uv
 ENV KANBAN_DB_DIR=/data
 RUN mkdir -p /data
 
-COPY backend/pyproject.toml ./
-RUN uv sync
+COPY backend/pyproject.toml backend/uv.lock ./
+RUN uv sync --frozen
 
 # Copy backend source files used by FastAPI app.
 COPY backend/*.py ./

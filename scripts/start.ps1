@@ -1,4 +1,2 @@
-$env:OPENROUTER_API_KEY = $env:OPENROUTER_API_KEY
-cd ..
-
-docker-compose up --build
+Set-Location (Join-Path $PSScriptRoot "..")
+docker compose up --build

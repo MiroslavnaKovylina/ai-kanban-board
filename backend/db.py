@@ -312,29 +312,6 @@ def register_user(username: str, password: str) -> tuple[int, int]:
     return user_id, board_id
 
 
-def get_or_create_user_board(username: str, password: str = "password") -> tuple[int, int]:
-    conn = get_db_connection()
-    row = conn.execute(
-        "SELECT id FROM users WHERE username = ?",
-        (username,),
-    ).fetchone()
-    if row is None:
-        user_id = create_user(username, password)
-    else:
-        user_id = int(row["id"])
-
-    board = conn.execute(
-        "SELECT id FROM boards WHERE user_id = ?",
-        (user_id,),
-    ).fetchone()
-    if board is None:
-        board_id = create_board_for_user(user_id)
-    else:
-        board_id = int(board["id"])
-
-    return user_id, board_id
-
-
 def get_board_for_user(user_id: int) -> int | None:
     conn = get_db_connection()
     row = conn.execute(

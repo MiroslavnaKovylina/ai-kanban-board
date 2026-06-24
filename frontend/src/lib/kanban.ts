@@ -2,6 +2,7 @@ export type Card = {
   id: string;
   title: string;
   details: string;
+  archived?: boolean;
 };
 
 export type Column = {

@@ -1,5 +1,6 @@
 from typing import Any
 from collections import defaultdict, deque
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 import json
 import os
@@ -11,7 +12,7 @@ from urllib.parse import urlparse
 
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from fastapi.staticfiles import StaticFiles
 
 from ai import openrouter_board_structured_response, openrouter_sanity_check
@@ -28,7 +29,15 @@ from db import (
     replace_board,
 )
 
-app = FastAPI(title="PM MVP Backend")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    _load_project_env()
+    get_db_connection()
+    yield
+
+
+app = FastAPI(title="PM MVP Backend", lifespan=lifespan)
 SESSION_COOKIE_NAME = "kanban_session"
 
 _ai_guard_lock = Lock()
@@ -147,10 +156,17 @@ def _check_and_consume_ai_rate_limit(ip_address: str) -> tuple[bool, str, int | 
     today = datetime.now(timezone.utc).date().isoformat()
 
     with _ai_guard_lock:
-        window = _ai_minute_windows[ip_address]
-        while window and window[0] <= minute_cutoff:
-            window.popleft()
+        for tracked_ip, tracked_window in list(_ai_minute_windows.items()):
+            while tracked_window and tracked_window[0] <= minute_cutoff:
+                tracked_window.popleft()
+            if not tracked_window:
+                del _ai_minute_windows[tracked_ip]
 
+        for tracked_ip, (usage_day, _) in list(_ai_daily_usage.items()):
+            if usage_day != today:
+                del _ai_daily_usage[tracked_ip]
+
+        window = _ai_minute_windows[ip_address]
         if len(window) >= per_minute_limit:
             retry_after = max(1, int(window[0] + 60 - now))
             return False, "Rate limit exceeded for AI endpoint. Please retry shortly.", retry_after
@@ -192,11 +208,14 @@ def _check_and_consume_auth_rate_limit(
     ]
 
     with _auth_guard_lock:
+        for tracked_key, tracked_window in list(_auth_attempt_windows.items()):
+            while tracked_window and tracked_window[0] <= cutoff:
+                tracked_window.popleft()
+            if not tracked_window:
+                del _auth_attempt_windows[tracked_key]
+
         for key in keys:
             window = _auth_attempt_windows[key]
-            while window and window[0] <= cutoff:
-                window.popleft()
-
             if len(window) >= limit:
                 retry_after = max(1, int(window[0] + window_seconds - now))
                 return False, "Too many authentication attempts. Please retry later.", retry_after
@@ -219,10 +238,7 @@ def _reset_auth_guards_for_tests() -> None:
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-    ],
+    allow_origins=list(_allowed_ai_origins()),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -247,12 +263,6 @@ def _load_project_env() -> None:
             os.environ[key] = value
 
 
-@app.on_event("startup")
-def startup() -> None:
-    _load_project_env()
-    get_db_connection()
-
-
 @app.get("/api/ping")
 async def ping():
     return {"success": True, "message": "pong"}
@@ -261,6 +271,14 @@ async def ping():
 class AuthRequest(BaseModel):
     username: str = Field(min_length=1)
     password: str = Field(min_length=1)
+
+    @field_validator("username")
+    @classmethod
+    def normalize_username(cls, value: str) -> str:
+        username = value.strip()
+        if not username:
+            raise ValueError("Username is required")
+        return username
 
 
 class BoardPayload(BaseModel):

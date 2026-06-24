@@ -71,6 +71,19 @@ class ApiTests(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 401)
 
+    def test_auth_trims_usernames(self) -> None:
+        register_response = self.client.post(
+            "/api/auth/register",
+            json={"username": " trimmed-user ", "password": "pw"},
+        )
+        self.assertEqual(register_response.status_code, 200)
+
+        login_response = self.client.post(
+            "/api/auth/login",
+            json={"username": "trimmed-user", "password": "pw"},
+        )
+        self.assertEqual(login_response.status_code, 200)
+
     def test_load_and_save_board(self) -> None:
         self.client.post(
             "/api/auth/register",

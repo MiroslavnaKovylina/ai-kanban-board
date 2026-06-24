@@ -104,8 +104,9 @@ Rules:
 - Resolve board by user_id; create if not found.
 - Load columns ordered by `position` for a board.
 - Load cards ordered by `position` for each column.
-- Rename column by `id`.
-- Reorder columns/cards by writing normalized positions in transaction.
+- Save board state by replacing the board's columns/cards from the submitted board JSON.
+- Existing card `archived` values are preserved by the frontend model when loaded and saved.
+- Column/card row `created_at` values are not authoritative across full-board saves in this MVP.
 
 ## Indexes
 
