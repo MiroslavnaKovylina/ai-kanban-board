@@ -181,28 +181,36 @@ Status (Part 8 - completed):
 
 ## Part 9: AI structured output with board context
 
-- [ ] Send the current Kanban JSON and user prompt to the AI
-- [ ] Include optional conversation history in the request
-- [ ] Parse structured outputs with both a user response and optional board updates
-- [ ] Apply AI-driven board updates when present
+- [x] Send the current Kanban JSON and user prompt to the AI
+- [x] Include optional conversation history in the request
+- [x] Parse structured outputs with both a user response and optional board updates
+- [x] Apply AI-driven board updates when present
 
 ### Tests and criteria
 - Structured outputs are validated and applied consistently
 - Backend has unit tests for AI request/response handling
 - UI receives both a user-facing message and optional board updates
 
+Status (Part 9 - active):
+- Started on 2026-06-24: backend endpoint `/api/ai/board` implemented with structured AI output parsing and optional board update persistence.
+- Validation so far: backend tests include structured AI endpoint behavior with/without board updates.
+
 ## Part 10: AI chat sidebar
 
-- [ ] Add a chat sidebar UI to the frontend
-- [ ] Send messages to the backend AI endpoint
-- [ ] Display AI responses in a chat view
-- [ ] Apply board updates from AI responses automatically
+- [x] Add a chat sidebar UI to the frontend
+- [x] Send messages to the backend AI endpoint
+- [x] Display AI responses in a chat view
+- [x] Apply board updates from AI responses automatically
 
 ### Tests and criteria
 - Chat UI interacts with the AI endpoint correctly
 - AI responses render in the sidebar
 - Board updates from AI refresh the UI automatically
 - Integration tests cover chat, message sending, and board updates
+
+Status (Part 10 - active):
+- Started on 2026-06-24: AI chat sidebar integrated in Kanban board and connected to backend `/api/ai/board` endpoint.
+- Validation so far: frontend tests pass (`vitest`, 14 tests) including chat sidebar behavior.
 
 ## Quality goals
 

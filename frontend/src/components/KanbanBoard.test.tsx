@@ -7,6 +7,18 @@ vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn() }),
 }));
 
+vi.mock("@/lib/auth", () => ({
+  loadBoard: vi.fn().mockResolvedValue(null),
+  logout: vi.fn(),
+  saveBoard: vi.fn().mockResolvedValue(true),
+  sendAiBoardPrompt: vi.fn().mockResolvedValue({
+    success: true,
+    message: "No changes needed.",
+    board_updated: false,
+    board: null,
+  }),
+}));
+
 const getFirstColumn = () => screen.getAllByTestId(/column-/i)[0];
 
 describe("KanbanBoard", () => {

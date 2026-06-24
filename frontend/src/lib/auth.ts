@@ -26,6 +26,18 @@ type AuthSession = {
   password: string;
 };
 
+export type ChatHistoryMessage = {
+  role: "user" | "assistant";
+  content: string;
+};
+
+export type AiBoardResponse = {
+  success: boolean;
+  message: string;
+  board_updated: boolean;
+  board: BoardData;
+};
+
 const loadSession = (): AuthSession | null => {
   if (typeof window === "undefined") {
     return null;
@@ -131,6 +143,32 @@ export const saveBoard = async (board: BoardData) => {
   });
 
   return response.ok;
+};
+
+export const sendAiBoardPrompt = async (
+  prompt: string,
+  history: ChatHistoryMessage[] = []
+): Promise<AiBoardResponse | null> => {
+  const payload = authPayload();
+  if (!payload) {
+    return null;
+  }
+
+  const response = await fetch(`${API_BASE_URL}/api/ai/board`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      ...payload,
+      prompt,
+      history,
+    }),
+  });
+
+  if (!response.ok) {
+    return null;
+  }
+
+  return (await response.json()) as AiBoardResponse;
 };
 
 export const logout = (router: NextRouter) => {

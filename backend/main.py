@@ -1,12 +1,13 @@
 from typing import Any
 import os
+from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from fastapi.staticfiles import StaticFiles
 
-from ai import openrouter_sanity_check
+from ai import openrouter_board_structured_response, openrouter_sanity_check
 
 from db import (
     authenticate_user,
@@ -31,8 +32,27 @@ app.add_middleware(
 )
 
 
+def _load_project_env() -> None:
+    env_path = Path(__file__).resolve().parent.parent / ".env"
+    if not env_path.exists():
+        return
+
+    for raw_line in env_path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+
+        if key and key not in os.environ:
+            os.environ[key] = value
+
+
 @app.on_event("startup")
 def startup() -> None:
+    _load_project_env()
     get_db_connection()
 
 
@@ -53,6 +73,16 @@ class BoardPayload(BaseModel):
 
 class SaveBoardRequest(AuthRequest):
     board: BoardPayload
+
+
+class ChatMessage(BaseModel):
+    role: str = Field(min_length=1)
+    content: str = Field(min_length=1)
+
+
+class AiBoardRequest(AuthRequest):
+    prompt: str = Field(min_length=1)
+    history: list[ChatMessage] = Field(default_factory=list)
 
 
 @app.post("/api/auth/register")
@@ -138,6 +168,54 @@ async def ai_sanity():
         "model": "openai/gpt-oss-120b",
         "prompt": "What is 2+2?",
         "response": result,
+    }
+
+
+@app.post("/api/ai/board")
+async def ai_board(payload: AiBoardRequest):
+    api_key = os.getenv("OPENROUTER_API_KEY")
+    if not api_key:
+        raise HTTPException(status_code=503, detail="OPENROUTER_API_KEY is not configured")
+
+    user_id = authenticate_user(payload.username, payload.password)
+    if user_id is None:
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+
+    board_id = get_board_for_user(user_id)
+    if board_id is None:
+        raise HTTPException(status_code=500, detail="User board not found")
+
+    current_board = load_board(board_id)
+    history = [item.model_dump() for item in payload.history]
+
+    try:
+        ai_result = openrouter_board_structured_response(
+            api_key=api_key,
+            prompt=payload.prompt,
+            board=current_board,
+            history=history,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"OpenRouter call failed: {exc}") from exc
+
+    updated_board = ai_result.get("board")
+    board_updated = isinstance(updated_board, dict)
+
+    if board_updated:
+        try:
+            replace_board(board_id, updated_board)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=f"AI board update invalid: {exc}") from exc
+
+    final_board = load_board(board_id)
+
+    return {
+        "success": True,
+        "message": ai_result["message"],
+        "board_updated": board_updated,
+        "board": final_board,
     }
 
 
