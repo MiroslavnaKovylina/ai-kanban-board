@@ -5,3 +5,9 @@ services:
       - '8000:8000'
     environment:
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      - KANBAN_DB_DIR=/data
+    volumes:
+      - kanban_data:/data
+
+volumes:
+  kanban_data:

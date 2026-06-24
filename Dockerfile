@@ -11,6 +11,8 @@ FROM python:3.12-slim
 WORKDIR /app
 
 RUN pip install uv
+ENV KANBAN_DB_DIR=/data
+RUN mkdir -p /data
 
 COPY backend/pyproject.toml ./
 RUN uv sync

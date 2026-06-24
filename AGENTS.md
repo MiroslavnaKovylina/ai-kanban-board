@@ -26,6 +26,9 @@ For the MVP, this will run locally (in a docker container)
 - Use OpenRouter for the AI calls. An OPENROUTER_API_KEY is in .env in the project root
 - Use `openai/gpt-oss-120b` as the model
 - Use SQLLite local database for the database, creating a new db if it doesn't exist
+- Persist SQLite data under `/data/kanban.db` (never under `/app`)
+- Resolve DB path in this order: `KANBAN_DB_PATH` -> `KANBAN_DB_DIR/kanban.db` -> `/data/kanban.db`
+- In Docker Compose, mount named volume `kanban_data:/data` so users and boards survive rebuilds/recreation
 - Start and Stop server scripts for Mac, PC, Linux in scripts/
 
 ## Starting Point
@@ -61,13 +64,16 @@ This phase is packaging, cleanup, and validation only. Do not add new features.
 1. Build the final image and start services from project root:
 	- `docker compose build --no-cache`
 	- `docker compose up -d`
-2. Validate container health and logs:
 	- `docker compose ps`
+2. Validate container health and logs:
 	- `docker compose logs --tail=200`
 3. Validate app routes:
 	- UI: `http://localhost:8000`
 	- API sanity: `http://localhost:8000/api/ping`
 	- AI sanity (with key configured): `http://localhost:8000/api/ai/sanity`
+4. Validate persistence path and file inside container:
+	- `docker compose exec app printenv KANBAN_DB_DIR` (expected `/data`)
+	- `docker compose exec app sh -lc "ls -la /data"` (expected `kanban.db`)
 
 ### Manual validation checklist (must pass in Docker runtime)
 
@@ -100,3 +106,6 @@ This phase is packaging, cleanup, and validation only. Do not add new features.
 2. Docker runtime validation summary.
 3. Manual test results for auth, persistence, and AI.
 4. Git hygiene verification summary.
+5. Persistence verification summary showing user survival across:
+	- `docker compose down` + `docker compose up`
+	- `docker compose up --build`

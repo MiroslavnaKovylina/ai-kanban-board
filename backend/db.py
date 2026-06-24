@@ -21,13 +21,14 @@ DEFAULT_COLUMN_TITLES = [
 def get_db_path() -> Path:
     env_path = os.getenv("KANBAN_DB_PATH")
     if env_path:
-        return Path(env_path)
+        return Path(env_path).expanduser()
 
     env_dir = os.getenv("KANBAN_DB_DIR")
     if env_dir:
-        return Path(env_dir) / "kanban.db"
+        return Path(env_dir).expanduser() / "kanban.db"
 
-    return Path(__file__).resolve().parent / "data" / "kanban.db"
+    # Default outside /app for container-friendly persistence.
+    return Path("/data/kanban.db")
 
 
 def ensure_database_directory(db_path: Path | None = None) -> None:

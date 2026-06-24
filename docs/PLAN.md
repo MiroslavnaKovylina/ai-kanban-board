@@ -239,6 +239,8 @@ Status (Part 10 - completed):
 	- invalid Origin/Referer returns 403
 	- oversized prompt/history/board context returns 422
 - Refresh and sign-out/sign-in cycles retain persisted board state
+- SQLite is persisted outside app code under `/data/kanban.db`
+- Persistence survives `docker compose down` + `docker compose up` and `docker compose up --build`
 - Git hygiene checks pass:
 	- `.env` is excluded from commits
 	- ignore rules cover `.venv*`, `node_modules/`, frontend build outputs (for example `out/`, `.next/`), and SQLite/db artifacts
@@ -252,13 +254,22 @@ Status (Part 11 - completed):
 	- `docker compose up -d` started `app` on `localhost:8000`.
 	- Container logs show clean startup and expected requests (`200` on `/` and `/api/ping`).
 	- Route validation: `/` -> `200` (static UI), `/api/ping` -> `200`, `/api/ai/sanity` -> `200` with response `"4"`.
+- 2026-06-24: persistence architecture refactor completed for local and cloud compatibility:
+	- Database path resolution now prioritizes `KANBAN_DB_PATH`, then `KANBAN_DB_DIR`, with default fallback `/data/kanban.db`.
+	- Docker runtime image sets `KANBAN_DB_DIR=/data` and creates `/data` automatically.
+	- `docker-compose.yml` mounts named volume `kanban_data:/data`.
+	- Verified database file location inside container: `/data/kanban.db`.
+- 2026-06-24: persistence verification in Docker runtime:
+	- Created user in running container and confirmed login success.
+	- Ran `docker compose down` then `docker compose up -d`; login for same user remained `200`.
+	- Ran `docker compose up --build -d`; login for same user remained `200`.
 - 2026-06-24: abuse protection runtime checks in container:
 	- invalid `Origin` -> `403`
 	- oversized prompt -> `422`
 	- repeated `/api/ai/board` calls exceeded per-minute threshold and returned `429`.
 - 2026-06-24: git hygiene checks:
 	- `.env` not tracked (`git ls-files --error-unmatch .env` failed as expected)
-	- ignore rules verified for `.venv*`, `node_modules/`, `.next/`, `out/`, and `backend/data/`.
+	- ignore rules verified for `.venv*`, `node_modules/`, `.next/`, `out/`, `backend/data/`, `*.db-*`, `*.sqlite-*`, and `*.sqlite3`.
 - 2026-06-24: E2E container validation script (`scripts/validate_part11_e2e.py`) executed against running container:
 	- Authentication (register/login): `PASS`
 	- Board CRUD and persistence (load/save/reload): `PASS`
