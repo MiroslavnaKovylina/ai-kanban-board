@@ -7,7 +7,7 @@ from unittest.mock import patch
 from fastapi.testclient import TestClient
 
 from db import close_db_connection
-from main import app, _reset_ai_guards_for_tests
+from main import app, _reset_ai_guards_for_tests, _reset_auth_guards_for_tests
 
 
 class AiBoardApiTests(unittest.TestCase):
@@ -16,8 +16,10 @@ class AiBoardApiTests(unittest.TestCase):
         self.db_path = Path(self.temp_dir.name) / "kanban.db"
         close_db_connection()
         _reset_ai_guards_for_tests()
+        _reset_auth_guards_for_tests()
         os.environ["KANBAN_DB_PATH"] = str(self.db_path)
         os.environ["OPENROUTER_API_KEY"] = "test-key"
+        os.environ["AUTH_RATE_LIMIT_ATTEMPTS"] = "10"
         os.environ["AI_RATE_LIMIT_PER_MINUTE"] = "20"
         os.environ["AI_DAILY_IP_LIMIT"] = "0"
         os.environ["AI_MAX_PROMPT_CHARS"] = "2000"
@@ -33,9 +35,11 @@ class AiBoardApiTests(unittest.TestCase):
 
     def tearDown(self) -> None:
         _reset_ai_guards_for_tests()
+        _reset_auth_guards_for_tests()
         close_db_connection()
         os.environ.pop("KANBAN_DB_PATH", None)
         os.environ.pop("OPENROUTER_API_KEY", None)
+        os.environ.pop("AUTH_RATE_LIMIT_ATTEMPTS", None)
         os.environ.pop("AI_RATE_LIMIT_PER_MINUTE", None)
         os.environ.pop("AI_DAILY_IP_LIMIT", None)
         os.environ.pop("AI_MAX_PROMPT_CHARS", None)
@@ -53,8 +57,6 @@ class AiBoardApiTests(unittest.TestCase):
         response = self.client.post(
             "/api/ai/board",
             json={
-                "username": "ai-user",
-                "password": "pw",
                 "prompt": "Summarize current board",
                 "history": [{"role": "user", "content": "hello"}],
             },
@@ -91,8 +93,6 @@ class AiBoardApiTests(unittest.TestCase):
         response = self.client.post(
             "/api/ai/board",
             json={
-                "username": "ai-user",
-                "password": "pw",
                 "prompt": "Add one task",
             },
         )
@@ -107,11 +107,10 @@ class AiBoardApiTests(unittest.TestCase):
         self.assertEqual(titles, ["To Do", "Done"])
 
     def test_ai_board_requires_valid_auth(self) -> None:
-        response = self.client.post(
+        unauthenticated_client = TestClient(app)
+        response = unauthenticated_client.post(
             "/api/ai/board",
             json={
-                "username": "ai-user",
-                "password": "bad",
                 "prompt": "Do something",
             },
         )
@@ -128,16 +127,12 @@ class AiBoardApiTests(unittest.TestCase):
         first = self.client.post(
             "/api/ai/board",
             json={
-                "username": "ai-user",
-                "password": "pw",
                 "prompt": "First request",
             },
         )
         second = self.client.post(
             "/api/ai/board",
             json={
-                "username": "ai-user",
-                "password": "pw",
                 "prompt": "Second request",
             },
         )
@@ -157,8 +152,6 @@ class AiBoardApiTests(unittest.TestCase):
             "/api/ai/board",
             headers={"origin": "http://evil.example"},
             json={
-                "username": "ai-user",
-                "password": "pw",
                 "prompt": "Do this",
             },
         )
@@ -171,8 +164,6 @@ class AiBoardApiTests(unittest.TestCase):
         response = self.client.post(
             "/api/ai/board",
             json={
-                "username": "ai-user",
-                "password": "pw",
                 "prompt": "This prompt is definitely longer than ten chars",
             },
         )
@@ -184,8 +175,6 @@ class AiBoardApiTests(unittest.TestCase):
         response = self.client.post(
             "/api/ai/board",
             json={
-                "username": "ai-user",
-                "password": "pw",
                 "prompt": "ok",
                 "history": [{"role": "user", "content": "too long"}],
             },

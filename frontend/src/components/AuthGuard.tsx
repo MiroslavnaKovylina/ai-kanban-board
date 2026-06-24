@@ -9,11 +9,23 @@ export const AuthGuard = ({ children }: { children: React.ReactNode }) => {
   const [checked, setChecked] = useState(false);
 
   useEffect(() => {
-    if (!isAuthenticated()) {
-      router.push("/login");
-      return;
-    }
-    setChecked(true);
+    let mounted = true;
+
+    const checkAuth = async () => {
+      if (!(await isAuthenticated())) {
+        router.push("/login");
+        return;
+      }
+      if (mounted) {
+        setChecked(true);
+      }
+    };
+
+    void checkAuth();
+
+    return () => {
+      mounted = false;
+    };
   }, [router]);
 
   if (!checked) {

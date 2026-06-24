@@ -33,7 +33,14 @@ describe("LoginPage", () => {
 
   it("redirects on valid credentials", async () => {
     const push = vi.fn();
-    mockedUseRouter.mockReturnValue({ push } as any);
+    mockedUseRouter.mockReturnValue({
+      push,
+      replace: vi.fn(),
+      refresh: vi.fn(),
+      back: vi.fn(),
+      forward: vi.fn(),
+      prefetch: vi.fn(),
+    });
     mockedLogin.mockResolvedValue(true);
 
     render(<LoginPage />);
@@ -48,7 +55,14 @@ describe("LoginPage", () => {
 
   it("creates a new account and redirects", async () => {
     const push = vi.fn();
-    mockedUseRouter.mockReturnValue({ push } as any);
+    mockedUseRouter.mockReturnValue({
+      push,
+      replace: vi.fn(),
+      refresh: vi.fn(),
+      back: vi.fn(),
+      forward: vi.fn(),
+      prefetch: vi.fn(),
+    });
     mockedRegister.mockResolvedValue(true);
 
     render(<LoginPage />);

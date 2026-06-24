@@ -6,6 +6,7 @@ Tests: auth, board CRUD, persistence, and AI endpoint.
 import json
 import sys
 import time
+from http.cookies import SimpleCookie
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
@@ -13,22 +14,37 @@ from urllib.request import Request, urlopen
 BASE_URL = "http://localhost:8000"
 TEST_USER = "test_e2e_user"
 TEST_PASSWORD = "test_e2e_password"
+COOKIE_HEADER = ""
+
+
+def remember_response_cookies(set_cookie_headers: list[str]) -> None:
+    """Keep the session cookie between validation requests."""
+    global COOKIE_HEADER
+    cookies = SimpleCookie()
+    for header in set_cookie_headers:
+        cookies.load(header)
+    if cookies:
+        COOKIE_HEADER = "; ".join(f"{key}={value.value}" for key, value in cookies.items())
 
 
 def http_request(method: str, endpoint: str, data: dict | None = None) -> tuple[int, dict]:
     """Make HTTP request and return (status_code, response_dict)."""
     url = f"{BASE_URL}{endpoint}"
     headers = {"Content-Type": "application/json"}
+    if COOKIE_HEADER:
+        headers["Cookie"] = COOKIE_HEADER
     body = json.dumps(data).encode() if data else None
 
     req = Request(url, data=body, headers=headers, method=method)
     try:
         with urlopen(req, timeout=10) as response:
+            remember_response_cookies(response.headers.get_all("Set-Cookie", []))
             status = response.status
             content = response.read().decode()
             result = json.loads(content) if content else {}
             return status, result
     except HTTPError as exc:
+        remember_response_cookies(exc.headers.get_all("Set-Cookie", []))
         status = exc.code
         content = exc.read().decode()
         result = json.loads(content) if content else {}
@@ -65,10 +81,7 @@ def test_auth():
 def test_board_persistence():
     """Test board load, save, and reload."""
     print("[BOARD] Testing initial board load...")
-    status, resp = http_request("POST", "/api/board/load", {
-        "username": TEST_USER,
-        "password": TEST_PASSWORD,
-    })
+    status, resp = http_request("POST", "/api/board/load")
     if status != 200:
         print(f"  FAIL: board/load returned {status}")
         return False
@@ -88,8 +101,6 @@ def test_board_persistence():
         new_board = board
     
     status, resp = http_request("POST", "/api/board/save", {
-        "username": TEST_USER,
-        "password": TEST_PASSWORD,
         "board": new_board,
     })
     if status != 200:
@@ -99,10 +110,7 @@ def test_board_persistence():
 
     print("[BOARD] Testing board reload (persistence)...")
     time.sleep(0.5)
-    status, resp = http_request("POST", "/api/board/load", {
-        "username": TEST_USER,
-        "password": TEST_PASSWORD,
-    })
+    status, resp = http_request("POST", "/api/board/load")
     if status != 200:
         print(f"  FAIL: reload board returned {status}")
         return False
@@ -120,8 +128,6 @@ def test_ai_endpoint():
     """Test AI endpoint with valid auth and abuse protections."""
     print("[AI] Testing AI board endpoint with valid auth...")
     status, resp = http_request("POST", "/api/ai/board", {
-        "username": TEST_USER,
-        "password": TEST_PASSWORD,
         "prompt": "What columns exist?",
         "history": [],
     })
@@ -143,8 +149,14 @@ def test_ai_endpoint():
 
 def test_relogin():
     """Test logout and relogin persistence."""
-    print("[RELOGIN] Testing logout (local operation, no server call)...")
-    print(f"  OK: logout is client-side only")
+    global COOKIE_HEADER
+    print("[RELOGIN] Testing logout...")
+    status, resp = http_request("POST", "/api/auth/logout")
+    if status != 200:
+        print(f"  FAIL: logout returned {status}")
+        return False
+    COOKIE_HEADER = ""
+    print(f"  OK: logout completed")
 
     print("[RELOGIN] Testing relogin after logout...")
     status, resp = http_request("POST", "/api/auth/login", {
@@ -157,10 +169,7 @@ def test_relogin():
     print(f"  OK: relogin successful, session restored")
 
     print("[RELOGIN] Testing board still persisted after relogin...")
-    status, resp = http_request("POST", "/api/board/load", {
-        "username": TEST_USER,
-        "password": TEST_PASSWORD,
-    })
+    status, resp = http_request("POST", "/api/board/load")
     if status == 200:
         print(f"  OK: board still available after relogin")
         return True

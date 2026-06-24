@@ -2,8 +2,6 @@
 
 import { type BoardData } from "@/lib/kanban";
 
-const AUTH_STORAGE_KEY = "kanban-auth-session";
-
 const resolveApiBaseUrl = () => {
   const configured = process.env.NEXT_PUBLIC_API_BASE_URL?.trim();
   if (configured) {
@@ -19,11 +17,6 @@ const resolveApiBaseUrl = () => {
 };
 
 const API_BASE_URL = resolveApiBaseUrl();
-
-type AuthSession = {
-  username: string;
-  password: string;
-};
 
 type RouterLike = {
   push: (href: string) => void;
@@ -41,88 +34,55 @@ export type AiBoardResponse = {
   board: BoardData;
 };
 
-const loadSession = (): AuthSession | null => {
-  if (typeof window === "undefined") {
-    return null;
-  }
-
-  const raw = localStorage.getItem(AUTH_STORAGE_KEY);
-  if (!raw) {
-    return null;
-  }
-
-  try {
-    const parsed = JSON.parse(raw) as AuthSession;
-    if (typeof parsed.username === "string" && typeof parsed.password === "string") {
-      return parsed;
-    }
-    return null;
-  } catch {
-    return null;
-  }
+export type AuthMeResponse = {
+  success: boolean;
+  user_id: number;
+  username: string;
+  board_id: number;
 };
 
-const saveSession = (session: AuthSession) => {
-  if (typeof window === "undefined") {
-    return;
-  }
-  localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(session));
-};
+export const getCurrentUser = async (): Promise<AuthMeResponse | null> => {
+  const response = await fetch(`${API_BASE_URL}/api/auth/me`, {
+    method: "GET",
+    credentials: "include",
+  });
 
-const authPayload = () => {
-  const session = loadSession();
-  if (!session) {
+  if (!response.ok) {
     return null;
   }
-  return {
-    username: session.username,
-    password: session.password,
-  };
+
+  return (await response.json()) as AuthMeResponse;
 };
 
-export const isAuthenticated = () =>
-  typeof window !== "undefined" && loadSession() !== null;
+export const isAuthenticated = async () => (await getCurrentUser()) !== null;
 
 export const registerUser = async (username: string, password: string) => {
   const response = await fetch(`${API_BASE_URL}/api/auth/register`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
+    credentials: "include",
     body: JSON.stringify({ username, password }),
   });
 
-  if (!response.ok) {
-    return false;
-  }
-
-  saveSession({ username, password });
-  return true;
+  return response.ok;
 };
 
 export const login = async (username: string, password: string) => {
   const response = await fetch(`${API_BASE_URL}/api/auth/login`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
+    credentials: "include",
     body: JSON.stringify({ username, password }),
   });
 
-  if (!response.ok) {
-    return false;
-  }
-
-  saveSession({ username, password });
-  return true;
+  return response.ok;
 };
 
 export const loadBoard = async (): Promise<BoardData | null> => {
-  const payload = authPayload();
-  if (!payload) {
-    return null;
-  }
-
   const response = await fetch(`${API_BASE_URL}/api/board/load`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
+    credentials: "include",
   });
 
   if (!response.ok) {
@@ -134,15 +94,11 @@ export const loadBoard = async (): Promise<BoardData | null> => {
 };
 
 export const saveBoard = async (board: BoardData) => {
-  const payload = authPayload();
-  if (!payload) {
-    return false;
-  }
-
   const response = await fetch(`${API_BASE_URL}/api/board/save`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ ...payload, board }),
+    credentials: "include",
+    body: JSON.stringify({ board }),
   });
 
   return response.ok;
@@ -152,16 +108,11 @@ export const sendAiBoardPrompt = async (
   prompt: string,
   history: ChatHistoryMessage[] = []
 ): Promise<AiBoardResponse | null> => {
-  const payload = authPayload();
-  if (!payload) {
-    return null;
-  }
-
   const response = await fetch(`${API_BASE_URL}/api/ai/board`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
+    credentials: "include",
     body: JSON.stringify({
-      ...payload,
       prompt,
       history,
     }),
@@ -174,9 +125,10 @@ export const sendAiBoardPrompt = async (
   return (await response.json()) as AiBoardResponse;
 };
 
-export const logout = (router: RouterLike) => {
-  if (typeof window !== "undefined") {
-    localStorage.removeItem(AUTH_STORAGE_KEY);
-  }
+export const logout = async (router: RouterLike) => {
+  await fetch(`${API_BASE_URL}/api/auth/logout`, {
+    method: "POST",
+    credentials: "include",
+  });
   router.push("/login");
 };

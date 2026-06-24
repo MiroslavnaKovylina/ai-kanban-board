@@ -5,7 +5,7 @@ This backend uses the normalized relational model from the course.
 ## Engine and file location
 
 - Engine: SQLite
-- Default file: backend/data/kanban.db
+- Default file: /data/kanban.db
 - Optional overrides:
 	- KANBAN_DB_PATH (full file path)
 	- KANBAN_DB_DIR (directory where kanban.db is created)
@@ -16,7 +16,10 @@ This backend uses the normalized relational model from the course.
 Schema setup is executed on backend startup and is idempotent.
 
 - Table `schema_migrations` tracks applied versions.
-- Migration `v1` creates all core tables and indexes.
+- Migration `v1` creates all core board tables and indexes.
+- Migration `v2` normalizes the default "To Do" column title.
+- Migration `v3` creates session storage.
+- Migration `v4` marks the session-token hashing upgrade; startup hashes any legacy raw session tokens.
 - Re-running startup does not duplicate schema or corrupt existing data.
 
 ## Core tables
@@ -76,6 +79,18 @@ Rules:
 - `archived` is a soft-delete flag for future use.
 - `position` starts at 0 and is unique within each column.
 
+### sessions
+
+- token TEXT PRIMARY KEY
+- user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE
+- created_at TEXT NOT NULL
+- expires_at TEXT NOT NULL
+
+Rules:
+- `token` stores `sha256(session_token)`, not the raw cookie token.
+- Expired sessions are rejected during lookup.
+- Logout deletes the matching session row.
+
 ## Ordering semantics
 
 - Column ordering is controlled by integer `position` values per board.
@@ -97,3 +112,5 @@ Rules:
 - idx_boards_user_id on boards(user_id)
 - idx_columns_board_id on "columns"(board_id)
 - idx_cards_column_id on cards(column_id)
+- idx_sessions_user_id on sessions(user_id)
+- idx_sessions_expires_at on sessions(expires_at)

@@ -4,11 +4,12 @@ from datetime import datetime, timezone
 import json
 import os
 from pathlib import Path
+import sqlite3
 import time
 from threading import Lock
 from urllib.parse import urlparse
 
-from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from fastapi.staticfiles import StaticFiles
@@ -17,18 +18,24 @@ from ai import openrouter_board_structured_response, openrouter_sanity_check
 
 from db import (
     authenticate_user,
+    create_session,
+    delete_session,
     get_board_for_user,
     get_db_connection,
+    get_session_user,
     load_board,
     register_user,
     replace_board,
 )
 
 app = FastAPI(title="PM MVP Backend")
+SESSION_COOKIE_NAME = "kanban_session"
 
 _ai_guard_lock = Lock()
 _ai_minute_windows: dict[str, deque[float]] = defaultdict(deque)
 _ai_daily_usage: dict[str, tuple[str, int]] = {}
+_auth_guard_lock = Lock()
+_auth_attempt_windows: dict[str, deque[float]] = defaultdict(deque)
 
 
 def _get_int_env(name: str, default: int, minimum: int = 0) -> int:
@@ -42,6 +49,61 @@ def _get_int_env(name: str, default: int, minimum: int = 0) -> int:
         return default
 
     return max(value, minimum)
+
+
+def _get_bool_env(name: str, default: bool) -> bool:
+    raw_value = os.getenv(name)
+    if raw_value is None:
+        return default
+    return raw_value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _session_ttl_days() -> int:
+    return _get_int_env("SESSION_TTL_DAYS", 7, minimum=1)
+
+
+def _is_local_development() -> bool:
+    environment = os.getenv("ENVIRONMENT", os.getenv("APP_ENV", "local")).strip().lower()
+    return environment in {"local", "dev", "development", "test"}
+
+
+def _session_cookie_secure() -> bool:
+    raw_value = os.getenv("SESSION_COOKIE_SECURE")
+    if raw_value is not None:
+        return _get_bool_env("SESSION_COOKIE_SECURE", False)
+    # Local Docker runs on HTTP. Production must set SESSION_COOKIE_SECURE=true.
+    return not _is_local_development()
+
+
+def _set_session_cookie(response: Response, token: str) -> None:
+    ttl_days = _session_ttl_days()
+    response.set_cookie(
+        key=SESSION_COOKIE_NAME,
+        value=token,
+        max_age=ttl_days * 24 * 60 * 60,
+        httponly=True,
+        secure=_session_cookie_secure(),
+        samesite="lax",
+        path="/",
+    )
+
+
+def _clear_session_cookie(response: Response) -> None:
+    response.delete_cookie(
+        key=SESSION_COOKIE_NAME,
+        httponly=True,
+        secure=_session_cookie_secure(),
+        samesite="lax",
+        path="/",
+    )
+
+
+def require_session_user(request: Request):
+    token = request.cookies.get(SESSION_COOKIE_NAME)
+    user = get_session_user(token)
+    if user is None:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    return user
 
 
 def _allowed_ai_origins() -> set[str]:
@@ -109,10 +171,51 @@ def _check_and_consume_ai_rate_limit(ip_address: str) -> tuple[bool, str, int | 
     return True, "", None
 
 
+def _client_ip(request: Request) -> str:
+    return request.client.host if request.client else "unknown"
+
+
+def _check_and_consume_auth_rate_limit(
+    request: Request,
+    action: str,
+    username: str,
+) -> tuple[bool, str, int | None]:
+    limit = _get_int_env("AUTH_RATE_LIMIT_ATTEMPTS", 10, minimum=1)
+    window_seconds = _get_int_env("AUTH_RATE_LIMIT_WINDOW_SECONDS", 300, minimum=1)
+
+    now = time.time()
+    cutoff = now - window_seconds
+    normalized_username = username.strip().lower()
+    keys = [
+        f"{action}:ip:{_client_ip(request)}",
+        f"{action}:user:{normalized_username}",
+    ]
+
+    with _auth_guard_lock:
+        for key in keys:
+            window = _auth_attempt_windows[key]
+            while window and window[0] <= cutoff:
+                window.popleft()
+
+            if len(window) >= limit:
+                retry_after = max(1, int(window[0] + window_seconds - now))
+                return False, "Too many authentication attempts. Please retry later.", retry_after
+
+        for key in keys:
+            _auth_attempt_windows[key].append(now)
+
+    return True, "", None
+
+
 def _reset_ai_guards_for_tests() -> None:
     with _ai_guard_lock:
         _ai_minute_windows.clear()
         _ai_daily_usage.clear()
+
+
+def _reset_auth_guards_for_tests() -> None:
+    with _auth_guard_lock:
+        _auth_attempt_windows.clear()
 
 app.add_middleware(
     CORSMiddleware,
@@ -165,7 +268,7 @@ class BoardPayload(BaseModel):
     cards: dict[str, dict[str, Any]]
 
 
-class SaveBoardRequest(AuthRequest):
+class SaveBoardRequest(BaseModel):
     board: BoardPayload
 
 
@@ -174,36 +277,31 @@ class ChatMessage(BaseModel):
     content: str = Field(min_length=1)
 
 
-class AiBoardRequest(AuthRequest):
+class AiBoardRequest(BaseModel):
     prompt: str = Field(min_length=1)
     history: list[ChatMessage] = Field(default_factory=list)
 
 
 @app.post("/api/auth/register")
-async def register(payload: AuthRequest):
+async def register(payload: AuthRequest, request: Request, response: Response):
+    is_allowed, limit_error, retry_after = _check_and_consume_auth_rate_limit(
+        request,
+        "register",
+        payload.username,
+    )
+    if not is_allowed:
+        headers = {"Retry-After": str(retry_after)} if retry_after is not None else None
+        raise HTTPException(status_code=429, detail=limit_error, headers=headers)
+
     try:
         user_id, board_id = register_user(payload.username, payload.password)
-        return {
-            "success": True,
-            "user_id": user_id,
-            "board_id": board_id,
-        }
+    except sqlite3.IntegrityError as exc:
+        raise HTTPException(status_code=409, detail="Username already exists") from exc
     except Exception as exc:
-        message = str(exc).lower()
-        if "unique" in message:
-            raise HTTPException(status_code=409, detail="Username already exists") from exc
         raise HTTPException(status_code=500, detail="Failed to register user") from exc
 
-
-@app.post("/api/auth/login")
-async def login(payload: AuthRequest):
-    user_id = authenticate_user(payload.username, payload.password)
-    if user_id is None:
-        raise HTTPException(status_code=401, detail="Invalid credentials")
-
-    board_id = get_board_for_user(user_id)
-    if board_id is None:
-        raise HTTPException(status_code=500, detail="User board not found")
+    token, _ = create_session(user_id, ttl_days=_session_ttl_days())
+    _set_session_cookie(response, token)
 
     return {
         "success": True,
@@ -212,12 +310,60 @@ async def login(payload: AuthRequest):
     }
 
 
-@app.post("/api/board/load")
-async def load_user_board(payload: AuthRequest):
+@app.post("/api/auth/login")
+async def login(payload: AuthRequest, request: Request, response: Response):
+    is_allowed, limit_error, retry_after = _check_and_consume_auth_rate_limit(
+        request,
+        "login",
+        payload.username,
+    )
+    if not is_allowed:
+        headers = {"Retry-After": str(retry_after)} if retry_after is not None else None
+        raise HTTPException(status_code=429, detail=limit_error, headers=headers)
+
     user_id = authenticate_user(payload.username, payload.password)
     if user_id is None:
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
+    board_id = get_board_for_user(user_id)
+    if board_id is None:
+        raise HTTPException(status_code=500, detail="User board not found")
+
+    token, _ = create_session(user_id, ttl_days=_session_ttl_days())
+    _set_session_cookie(response, token)
+
+    return {
+        "success": True,
+        "user_id": user_id,
+        "board_id": board_id,
+    }
+
+
+@app.get("/api/auth/me")
+async def auth_me(current_user=Depends(require_session_user)):
+    board_id = get_board_for_user(int(current_user["id"]))
+    if board_id is None:
+        raise HTTPException(status_code=500, detail="User board not found")
+
+    return {
+        "success": True,
+        "user_id": int(current_user["id"]),
+        "username": current_user["username"],
+        "board_id": board_id,
+    }
+
+
+@app.post("/api/auth/logout")
+async def auth_logout(request: Request, response: Response):
+    token = request.cookies.get(SESSION_COOKIE_NAME)
+    delete_session(token)
+    _clear_session_cookie(response)
+    return {"success": True}
+
+
+@app.post("/api/board/load")
+async def load_user_board(current_user=Depends(require_session_user)):
+    user_id = int(current_user["id"])
     board_id = get_board_for_user(user_id)
     if board_id is None:
         raise HTTPException(status_code=500, detail="User board not found")
@@ -229,11 +375,8 @@ async def load_user_board(payload: AuthRequest):
 
 
 @app.post("/api/board/save")
-async def save_user_board(payload: SaveBoardRequest):
-    user_id = authenticate_user(payload.username, payload.password)
-    if user_id is None:
-        raise HTTPException(status_code=401, detail="Invalid credentials")
-
+async def save_user_board(payload: SaveBoardRequest, current_user=Depends(require_session_user)):
+    user_id = int(current_user["id"])
     board_id = get_board_for_user(user_id)
     if board_id is None:
         raise HTTPException(status_code=500, detail="User board not found")
@@ -247,7 +390,7 @@ async def save_user_board(payload: SaveBoardRequest):
 
 
 @app.get("/api/ai/sanity")
-async def ai_sanity():
+async def ai_sanity(current_user=Depends(require_session_user)):
     api_key = os.getenv("OPENROUTER_API_KEY")
     if not api_key:
         raise HTTPException(status_code=503, detail="OPENROUTER_API_KEY is not configured")
@@ -266,7 +409,12 @@ async def ai_sanity():
 
 
 @app.post("/api/ai/board")
-async def ai_board(payload: AiBoardRequest, request: Request, response: Response):
+async def ai_board(
+    payload: AiBoardRequest,
+    request: Request,
+    response: Response,
+    current_user=Depends(require_session_user),
+):
     is_valid_origin, origin_error = _validate_ai_origin(
         origin=request.headers.get("origin"),
         referer=request.headers.get("referer"),
@@ -300,10 +448,7 @@ async def ai_board(payload: AiBoardRequest, request: Request, response: Response
     if not api_key:
         raise HTTPException(status_code=503, detail="OPENROUTER_API_KEY is not configured")
 
-    user_id = authenticate_user(payload.username, payload.password)
-    if user_id is None:
-        raise HTTPException(status_code=401, detail="Invalid credentials")
-
+    user_id = int(current_user["id"])
     board_id = get_board_for_user(user_id)
     if board_id is None:
         raise HTTPException(status_code=500, detail="User board not found")

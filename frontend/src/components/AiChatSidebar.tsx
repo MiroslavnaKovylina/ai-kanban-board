@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { type ChatHistoryMessage } from "@/lib/auth";
 
 export type SidebarMessage = {
@@ -17,11 +17,6 @@ export const AiChatSidebar = ({ onSend }: AiChatSidebarProps) => {
   const [draft, setDraft] = useState("");
   const [isSending, setIsSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  const history = useMemo<ChatHistoryMessage[]>(
-    () => messages.map((message) => ({ role: message.role, content: message.content })),
-    [messages]
-  );
 
   const submitPrompt = async () => {
     const prompt = draft.trim();

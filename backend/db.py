@@ -1,12 +1,39 @@
 import os
+import hmac
+import secrets
 import sqlite3
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+import hashlib
 from pathlib import Path
 from typing import Any
 
 
 def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def utc_now_dt() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+PASSWORD_PREFIX = "scrypt"
+PASSWORD_SALT_BYTES = 16
+PASSWORD_KEY_BYTES = 32
+PASSWORD_N = 16384
+PASSWORD_R = 8
+PASSWORD_P = 1
+
+
+def is_password_hash(value: str) -> bool:
+    return value.startswith(f"{PASSWORD_PREFIX}$")
+
+
+def hash_session_token(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def is_session_token_hash(value: str) -> bool:
+    return len(value) == 64 and all(char in "0123456789abcdef" for char in value.lower())
 
 
 DEFAULT_COLUMN_TITLES = [
@@ -100,6 +127,22 @@ def initialize_schema(connection: sqlite3.Connection) -> None:
         2: [
             "UPDATE \"columns\" SET title = 'To Do' WHERE title = 'Todo'",
         ],
+        3: [
+            """
+            CREATE TABLE IF NOT EXISTS sessions (
+                token TEXT PRIMARY KEY,
+                user_id INTEGER NOT NULL,
+                created_at TEXT NOT NULL,
+                expires_at TEXT NOT NULL,
+                FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id)",
+            "CREATE INDEX IF NOT EXISTS idx_sessions_expires_at ON sessions(expires_at)",
+        ],
+        4: [
+            "DELETE FROM sessions WHERE 0",
+        ],
     }
 
     for version in sorted(migrations.keys()):
@@ -117,6 +160,26 @@ def initialize_schema(connection: sqlite3.Connection) -> None:
                 "INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)",
                 (version, utc_now()),
             )
+
+    legacy_users = connection.execute("SELECT id, password FROM users").fetchall()
+    with connection:
+        for user in legacy_users:
+            password = user["password"]
+            if isinstance(password, str) and not is_password_hash(password):
+                connection.execute(
+                    "UPDATE users SET password = ? WHERE id = ?",
+                    (hash_password(password), int(user["id"])),
+                )
+
+    legacy_sessions = connection.execute("SELECT token FROM sessions").fetchall()
+    with connection:
+        for session in legacy_sessions:
+            token = session["token"]
+            if isinstance(token, str) and not is_session_token_hash(token):
+                connection.execute(
+                    "UPDATE sessions SET token = ? WHERE token = ?",
+                    (hash_session_token(token), token),
+                )
 
 
 def get_connection(db_path: Path | None = None) -> sqlite3.Connection:
@@ -154,13 +217,51 @@ def get_db_connection() -> sqlite3.Connection:
     return _connection
 
 
+def hash_password(password: str) -> str:
+    salt = secrets.token_hex(PASSWORD_SALT_BYTES)
+    digest = hashlib.scrypt(
+        password.encode("utf-8"),
+        salt=bytes.fromhex(salt),
+        n=PASSWORD_N,
+        r=PASSWORD_R,
+        p=PASSWORD_P,
+        dklen=PASSWORD_KEY_BYTES,
+    ).hex()
+    return f"{PASSWORD_PREFIX}${PASSWORD_N}${PASSWORD_R}${PASSWORD_P}${salt}${digest}"
+
+
+def verify_password(password: str, stored_password: str) -> bool:
+    if not is_password_hash(stored_password):
+        return False
+
+    parts = stored_password.split("$")
+    if len(parts) != 6:
+        return False
+
+    _, raw_n, raw_r, raw_p, salt, expected_digest = parts
+    try:
+        digest = hashlib.scrypt(
+            password.encode("utf-8"),
+            salt=bytes.fromhex(salt),
+            n=int(raw_n),
+            r=int(raw_r),
+            p=int(raw_p),
+            dklen=len(bytes.fromhex(expected_digest)),
+        ).hex()
+    except (ValueError, TypeError):
+        return False
+
+    return hmac.compare_digest(digest, expected_digest)
+
+
 def create_user(username: str, password: str) -> int:
     conn = get_db_connection()
     now = utc_now()
+    password_hash = hash_password(password)
     with conn:
         cursor = conn.execute(
             "INSERT INTO users (username, password, created_at) VALUES (?, ?, ?)",
-            (username, password, now),
+            (username, password_hash, now),
         )
     return int(cursor.lastrowid)
 
@@ -200,7 +301,7 @@ def authenticate_user(username: str, password: str) -> int | None:
     row = get_user_by_username(username)
     if row is None:
         return None
-    if row["password"] != password:
+    if not verify_password(password, row["password"]):
         return None
     return int(row["id"])
 
@@ -243,6 +344,54 @@ def get_board_for_user(user_id: int) -> int | None:
     if row is None:
         return None
     return int(row["id"])
+
+
+def create_session(user_id: int, ttl_days: int = 7) -> tuple[str, str]:
+    conn = get_db_connection()
+    token = secrets.token_urlsafe(32)
+    token_hash = hash_session_token(token)
+    created_at = utc_now_dt()
+    expires_at = created_at + timedelta(days=ttl_days)
+    with conn:
+        conn.execute(
+            """
+            INSERT INTO sessions (token, user_id, created_at, expires_at)
+            VALUES (?, ?, ?, ?)
+            """,
+            (token_hash, user_id, created_at.isoformat(), expires_at.isoformat()),
+        )
+    return token, expires_at.isoformat()
+
+
+def get_session_user(token: str | None) -> sqlite3.Row | None:
+    if not token:
+        return None
+
+    conn = get_db_connection()
+    now = utc_now()
+    token_hash = hash_session_token(token)
+    row = conn.execute(
+        """
+        SELECT users.id, users.username
+        FROM sessions
+        JOIN users ON users.id = sessions.user_id
+        WHERE sessions.token = ? AND sessions.expires_at > ?
+        """,
+        (token_hash, now),
+    ).fetchone()
+    if row is None:
+        delete_session(token)
+    return row
+
+
+def delete_session(token: str | None) -> None:
+    if not token:
+        return
+
+    conn = get_db_connection()
+    token_hash = hash_session_token(token)
+    with conn:
+        conn.execute("DELETE FROM sessions WHERE token IN (?, ?)", (token_hash, token))
 
 
 def _next_position(table_name: str, parent_field: str, parent_id: int) -> int:

@@ -6,11 +6,16 @@ from pathlib import Path
 from db import (
     add_card,
     add_column,
+    authenticate_user,
     close_db_connection,
     create_board_for_user,
+    create_session,
     create_user,
+    delete_session,
     get_db_connection,
     get_db_path,
+    get_session_user,
+    hash_session_token,
     rename_column,
     reorder_cards,
     reorder_columns,
@@ -50,10 +55,17 @@ class DatabaseSchemaTests(unittest.TestCase):
         self.assertIn("boards", table_names)
         self.assertIn("columns", table_names)
         self.assertIn("cards", table_names)
+        self.assertIn("sessions", table_names)
 
-    def test_username_unique_and_one_board_per_user(self) -> None:
+    def test_username_unique_password_hashed_and_one_board_per_user(self) -> None:
         user_id = create_user("user", "password")
         self.assertGreater(user_id, 0)
+        row = get_db_connection().execute(
+            "SELECT password FROM users WHERE id = ?",
+            (user_id,),
+        ).fetchone()
+        self.assertNotEqual(row["password"], "password")
+        self.assertEqual(authenticate_user("user", "password"), user_id)
 
         with self.assertRaises(sqlite3.IntegrityError):
             create_user("user", "password")
@@ -63,6 +75,66 @@ class DatabaseSchemaTests(unittest.TestCase):
 
         with self.assertRaises(sqlite3.IntegrityError):
             create_board_for_user(user_id, "Second board")
+
+    def test_session_can_be_created_loaded_and_deleted(self) -> None:
+        user_id = create_user("session-user", "password")
+        token, expires_at = create_session(user_id)
+
+        self.assertTrue(token)
+        self.assertTrue(expires_at)
+        stored = get_db_connection().execute("SELECT token FROM sessions").fetchone()
+        self.assertEqual(stored["token"], hash_session_token(token))
+        self.assertNotEqual(stored["token"], token)
+
+        row = get_session_user(token)
+        self.assertIsNotNone(row)
+        self.assertEqual(row["username"], "session-user")
+
+        delete_session(token)
+        self.assertIsNone(get_session_user(token))
+
+    def test_legacy_plaintext_password_is_upgraded_on_initialization(self) -> None:
+        conn = get_db_connection()
+        with conn:
+            conn.execute(
+                "INSERT INTO users (username, password, created_at) VALUES (?, ?, ?)",
+                ("legacy", "plaintext", "2026-01-01T00:00:00+00:00"),
+            )
+
+        close_db_connection()
+        conn = get_db_connection()
+        row = conn.execute(
+            "SELECT password FROM users WHERE username = ?",
+            ("legacy",),
+        ).fetchone()
+
+        self.assertNotEqual(row["password"], "plaintext")
+        self.assertIsNotNone(authenticate_user("legacy", "plaintext"))
+
+    def test_legacy_raw_session_token_is_upgraded_on_initialization(self) -> None:
+        user_id = create_user("legacy-session", "password")
+        raw_token = "legacy-raw-session-token"
+        conn = get_db_connection()
+        with conn:
+            conn.execute(
+                """
+                INSERT INTO sessions (token, user_id, created_at, expires_at)
+                VALUES (?, ?, ?, ?)
+                """,
+                (
+                    raw_token,
+                    user_id,
+                    "2026-01-01T00:00:00+00:00",
+                    "2099-01-01T00:00:00+00:00",
+                ),
+            )
+
+        close_db_connection()
+        conn = get_db_connection()
+        stored = conn.execute("SELECT token FROM sessions WHERE user_id = ?", (user_id,)).fetchone()
+
+        self.assertEqual(stored["token"], hash_session_token(raw_token))
+        self.assertIsNotNone(get_session_user(raw_token))
 
     def test_columns_can_be_renamed_and_reordered_by_position(self) -> None:
         user_id = create_user("alice", "password")

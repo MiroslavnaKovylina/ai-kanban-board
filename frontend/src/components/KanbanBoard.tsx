@@ -194,7 +194,7 @@ export const KanbanBoard = () => {
             <button
               type="button"
               className="rounded-full border border-[var(--stroke)] bg-white px-4 py-2 text-sm font-semibold text-[var(--navy-dark)] hover:bg-[var(--surface)]"
-              onClick={() => logout(router)}
+              onClick={() => void logout(router)}
             >
               Logout
             </button>
