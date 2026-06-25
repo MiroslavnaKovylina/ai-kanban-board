@@ -126,9 +126,13 @@ export const sendAiBoardPrompt = async (
 };
 
 export const logout = async (router: RouterLike) => {
-  await fetch(`${API_BASE_URL}/api/auth/logout`, {
-    method: "POST",
-    credentials: "include",
-  });
+  try {
+    await fetch(`${API_BASE_URL}/api/auth/logout`, {
+      method: "POST",
+      credentials: "include",
+    });
+  } catch {
+    // Proceed to redirect even if the server call fails.
+  }
   router.push("/login");
 };

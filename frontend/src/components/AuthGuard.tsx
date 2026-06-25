@@ -12,7 +12,12 @@ export const AuthGuard = ({ children }: { children: React.ReactNode }) => {
     let mounted = true;
 
     const checkAuth = async () => {
-      if (!(await isAuthenticated())) {
+      try {
+        if (!(await isAuthenticated())) {
+          router.push("/login");
+          return;
+        }
+      } catch {
         router.push("/login");
         return;
       }

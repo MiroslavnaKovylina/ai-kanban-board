@@ -9,3 +9,9 @@ dependencies = [
     "python-multipart>=0.0.7",
     "httpx>=0.28.0",
 ]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "pytest-cov>=7.1.0",
+]

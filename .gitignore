@@ -145,6 +145,10 @@ frontend/.next/
 out/
 frontend/out/
 
+# Playwright
+frontend/tests/auth-state.json
+frontend/test-results/
+
 # Database artifacts
 *.db
 *.db-*

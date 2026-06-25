@@ -25,6 +25,7 @@ class AiBoardApiTests(unittest.TestCase):
         os.environ["AI_MAX_PROMPT_CHARS"] = "2000"
         os.environ["AI_MAX_HISTORY_MESSAGES"] = "20"
         os.environ["AI_MAX_HISTORY_CHARS"] = "8000"
+        os.environ["AI_ALLOW_HEADERLESS"] = "1"
         self.client = TestClient(app)
 
         reg = self.client.post(
@@ -45,9 +46,10 @@ class AiBoardApiTests(unittest.TestCase):
         os.environ.pop("AI_MAX_PROMPT_CHARS", None)
         os.environ.pop("AI_MAX_HISTORY_MESSAGES", None)
         os.environ.pop("AI_MAX_HISTORY_CHARS", None)
+        os.environ.pop("AI_ALLOW_HEADERLESS", None)
         self.temp_dir.cleanup()
 
-    @patch("main.openrouter_board_structured_response")
+    @patch("routes.ai_board.openrouter_board_structured_response")
     def test_ai_board_returns_message_without_update(self, mock_ai) -> None:
         mock_ai.return_value = {
             "message": "No changes needed.",
@@ -69,7 +71,7 @@ class AiBoardApiTests(unittest.TestCase):
         self.assertFalse(data["board_updated"])
         self.assertIn("columns", data["board"])
 
-    @patch("main.openrouter_board_structured_response")
+    @patch("routes.ai_board.openrouter_board_structured_response")
     def test_ai_board_applies_board_update(self, mock_ai) -> None:
         updated = {
             "columns": [
@@ -116,7 +118,7 @@ class AiBoardApiTests(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 401)
 
-    @patch("main.openrouter_board_structured_response")
+    @patch("routes.ai_board.openrouter_board_structured_response")
     def test_ai_board_rate_limit_returns_429(self, mock_ai) -> None:
         os.environ["AI_RATE_LIMIT_PER_MINUTE"] = "1"
         mock_ai.return_value = {
@@ -141,7 +143,7 @@ class AiBoardApiTests(unittest.TestCase):
         self.assertEqual(second.status_code, 429)
         self.assertIn("Rate limit exceeded", second.json()["detail"])
 
-    @patch("main.openrouter_board_structured_response")
+    @patch("routes.ai_board.openrouter_board_structured_response")
     def test_ai_board_rejects_invalid_origin(self, mock_ai) -> None:
         mock_ai.return_value = {
             "message": "OK",

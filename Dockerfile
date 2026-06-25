@@ -19,6 +19,7 @@ RUN uv sync --frozen
 
 # Copy backend source files used by FastAPI app.
 COPY backend/*.py ./
+COPY backend/routes/ ./routes/
 COPY --from=frontend-build /app/out ./static
 
 EXPOSE 8000

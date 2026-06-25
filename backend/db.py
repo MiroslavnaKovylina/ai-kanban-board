@@ -5,6 +5,7 @@ import sqlite3
 from datetime import datetime, timedelta, timezone
 import hashlib
 from pathlib import Path
+from threading import Lock
 from typing import Any
 
 
@@ -185,6 +186,9 @@ def initialize_schema(connection: sqlite3.Connection) -> None:
 def get_connection(db_path: Path | None = None) -> sqlite3.Connection:
     resolved = db_path or get_db_path()
     ensure_database_directory(resolved)
+    # check_same_thread=False is required because uvicorn's async event loop and the
+    # TestClient background thread both access this single shared connection; the
+    # _connection_lock below serialises connection creation and replacement.
     connection = sqlite3.connect(resolved, check_same_thread=False)
     connection.row_factory = sqlite3.Row
     connection.execute("PRAGMA foreign_keys = ON")
@@ -194,27 +198,28 @@ def get_connection(db_path: Path | None = None) -> sqlite3.Connection:
 
 _connection: sqlite3.Connection | None = None
 _connection_path: Path | None = None
+_connection_lock = Lock()
 
 
 def close_db_connection() -> None:
-    global _connection
-    global _connection_path
-    if _connection is not None:
-        _connection.close()
-    _connection = None
-    _connection_path = None
+    global _connection, _connection_path
+    with _connection_lock:
+        if _connection is not None:
+            _connection.close()
+        _connection = None
+        _connection_path = None
 
 
 def get_db_connection() -> sqlite3.Connection:
-    global _connection
-    global _connection_path
-
-    current_path = get_db_path()
-    if _connection is None or _connection_path != current_path:
-        close_db_connection()
-        _connection = get_connection(current_path)
-        _connection_path = current_path
-    return _connection
+    global _connection, _connection_path
+    with _connection_lock:
+        current_path = get_db_path()
+        if _connection is None or _connection_path != current_path:
+            if _connection is not None:
+                _connection.close()
+            _connection = get_connection(current_path)
+            _connection_path = current_path
+        return _connection
 
 
 def hash_password(password: str) -> str:
@@ -371,7 +376,13 @@ def delete_session(token: str | None) -> None:
         conn.execute("DELETE FROM sessions WHERE token IN (?, ?)", (token_hash, token))
 
 
+_ALLOWED_POSITION_TABLES = {'"columns"', "cards"}
+_ALLOWED_POSITION_FIELDS = {"board_id", "column_id"}
+
+
 def _next_position(table_name: str, parent_field: str, parent_id: int) -> int:
+    if table_name not in _ALLOWED_POSITION_TABLES or parent_field not in _ALLOWED_POSITION_FIELDS:
+        raise ValueError(f"Invalid table or field for position query: {table_name!r}, {parent_field!r}")
     conn = get_db_connection()
     row = conn.execute(
         f"SELECT COALESCE(MAX(position), -1) + 1 AS next_pos FROM {table_name} WHERE {parent_field} = ?",
@@ -487,43 +498,46 @@ def reorder_cards(column_id: int, ordered_card_ids: list[int]) -> None:
 
 def load_board(board_id: int) -> dict[str, Any]:
     conn = get_db_connection()
-    columns = conn.execute(
-        "SELECT id, title, position FROM \"columns\" WHERE board_id = ? ORDER BY position",
+    rows = conn.execute(
+        """
+        SELECT
+            c.id AS column_id, c.title AS column_title, c.position AS column_position,
+            k.id AS card_id, k.title AS card_title, k.details, k.position AS card_position,
+            k.archived
+        FROM "columns" c
+        LEFT JOIN cards k ON k.column_id = c.id
+        WHERE c.board_id = ?
+        ORDER BY c.position, k.position
+        """,
         (board_id,),
     ).fetchall()
 
     result_columns: list[dict[str, Any]] = []
     result_cards: dict[str, dict[str, Any]] = {}
+    seen_columns: dict[int, int] = {}
 
-    for column in columns:
-        cards = conn.execute(
-            """
-            SELECT id, title, details, position, archived
-            FROM cards
-            WHERE column_id = ?
-            ORDER BY position
-            """,
-            (int(column["id"]),),
-        ).fetchall()
-        card_ids: list[str] = []
-        for card in cards:
-            card_id = str(card["id"])
-            card_ids.append(card_id)
+    for row in rows:
+        col_id = int(row["column_id"])
+        if col_id not in seen_columns:
+            seen_columns[col_id] = len(result_columns)
+            result_columns.append(
+                {
+                    "id": str(col_id),
+                    "title": row["column_title"],
+                    "position": int(row["column_position"]),
+                    "cardIds": [],
+                }
+            )
+
+        if row["card_id"] is not None:
+            card_id = str(row["card_id"])
+            result_columns[seen_columns[col_id]]["cardIds"].append(card_id)
             result_cards[card_id] = {
                 "id": card_id,
-                "title": card["title"],
-                "details": card["details"],
-                "archived": bool(card["archived"]),
+                "title": row["card_title"],
+                "details": row["details"],
+                "archived": bool(row["archived"]),
             }
-
-        result_columns.append(
-            {
-                "id": str(column["id"]),
-                "title": column["title"],
-                "position": int(column["position"]),
-                "cardIds": card_ids,
-            }
-        )
 
     return {"columns": result_columns, "cards": result_cards}
 
@@ -544,6 +558,7 @@ def replace_board(board_id: int, board: dict[str, Any]) -> None:
         conn.execute("DELETE FROM cards WHERE column_id IN (SELECT id FROM \"columns\" WHERE board_id = ?)", (board_id,))
         conn.execute("DELETE FROM \"columns\" WHERE board_id = ?", (board_id,))
 
+        seen_card_keys: set[str] = set()
         for column_position, column in enumerate(columns):
             if not isinstance(column, dict):
                 raise ValueError("Each column must be an object")
@@ -567,6 +582,9 @@ def replace_board(board_id: int, board: dict[str, Any]) -> None:
 
             for card_position, card_id in enumerate(card_ids):
                 card_key = str(card_id)
+                if card_key in seen_card_keys:
+                    raise ValueError(f"Duplicate card id '{card_key}' across columns")
+                seen_card_keys.add(card_key)
                 card_data = cards.get(card_key)
                 if not isinstance(card_data, dict):
                     raise ValueError(f"Missing card payload for card id '{card_key}'")

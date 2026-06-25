@@ -32,10 +32,9 @@ def _extract_json_object(raw_text: str) -> dict[str, Any]:
     text = raw_text.strip()
 
     if text.startswith("```"):
-        # Remove optional markdown fences.
-        text = text.strip("`")
-        if "\n" in text:
-            text = text.split("\n", 1)[1]
+        # Remove the opening fence line (e.g. "```json") then the closing fence.
+        first_newline = text.find("\n")
+        text = text[first_newline + 1:] if first_newline != -1 else ""
         if text.endswith("```"):
             text = text[:-3]
         text = text.strip()

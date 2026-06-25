@@ -156,6 +156,7 @@ export const KanbanBoard = () => {
 
     if (result.board_updated) {
       setBoard(result.board);
+      void persistBoard(result.board);
     }
 
     return { message: result.message };

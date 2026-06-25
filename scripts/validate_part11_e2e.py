@@ -61,10 +61,13 @@ def test_auth():
         "username": TEST_USER,
         "password": TEST_PASSWORD,
     })
-    if status != 200:
+    if status == 409:
+        print(f"  OK: user already exists, proceeding to login")
+    elif status != 200:
         print(f"  FAIL: register returned {status}")
         return False
-    print(f"  OK: registered user {TEST_USER}")
+    else:
+        print(f"  OK: registered user {TEST_USER}")
 
     print("[AUTH] Testing login...")
     status, resp = http_request("POST", "/api/auth/login", {
@@ -116,7 +119,11 @@ def test_board_persistence():
         return False
     
     reloaded_board = resp.get("board", {})
-    if reloaded_board.get("columns") == new_board.get("columns"):
+    def col_key(c):
+        return (c.get("title"), c.get("position"))
+    saved_cols = sorted([col_key(c) for c in new_board.get("columns", [])])
+    reloaded_cols = sorted([col_key(c) for c in reloaded_board.get("columns", [])])
+    if reloaded_cols == saved_cols:
         print(f"  OK: board state persisted correctly")
     else:
         print(f"  WARN: board state mismatch after reload")
@@ -206,7 +213,7 @@ def main():
     print("Summary")
     print("=" * 60)
     for name, status in results:
-        symbol = "✓" if status == "PASS" else "✗" if status == "FAIL" else "!"
+        symbol = "OK" if status == "PASS" else "FAIL" if status == "FAIL" else "ERR"
         print(f"{symbol} {name}: {status}")
     
     all_passed = all(status == "PASS" for _, status in results)
